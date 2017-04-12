@@ -393,6 +393,14 @@ static struct lwip_select_cb *select_cb_list;
     and checked in event_callback to see if it has changed. */
 static volatile int select_cb_ctr;
 
+#define WIFICONF_LEN    (16)
+struct wificonf_ip_t {
+    char ip[WIFICONF_LEN];
+    char mask[WIFICONF_LEN];
+    char gw[WIFICONF_LEN];
+};
+static struct wificonf_ip_t wificonf_ip;
+
 /** Table to quickly map an lwIP error (err_t) to a socket error
   * by using -err as an index */
 static const int err_to_errno_table[] = {
@@ -687,6 +695,27 @@ free_socket(struct lwip_sock *sock, int is_tcp)
       netbuf_delete((struct netbuf *)lastdata);
     }
   }
+}
+
+int
+wificonf_getip(int fd, char *ip, char *mask, char *gw)
+{
+  struct lwip_sock *sock;
+  sock = get_socket(fd);
+  if (!sock) {
+    return -1;
+  }
+  SYS_ARCH_DECL_PROTECT(lev);
+
+  SYS_ARCH_PROTECT(lev);
+  sock->rcvevent = 0;
+  SYS_ARCH_UNPROTECT(lev);
+
+  memcpy(ip, wificonf_ip.ip, WIFICONF_LEN);
+  memcpy(mask, wificonf_ip.mask, WIFICONF_LEN);
+  memcpy(gw, wificonf_ip.gw, WIFICONF_LEN);
+
+  return 0;
 }
 
 /* Below this, the well-known socket functions are implemented.
@@ -1809,6 +1838,69 @@ return_copy_fdsets:
     *exceptset = lexceptset;
   }
   return nready;
+}
+
+esp_err_t wificonf_event_callback(void *ctx, system_event_t *event)
+{
+  int wificonf_fd = (int)(int*)ctx;
+  struct lwip_sock *sock;
+  struct lwip_select_cb *scb;
+  int last_select_cb_ctr;
+  SYS_ARCH_DECL_PROTECT(lev);
+
+  sock = get_socket(wificonf_fd);
+  if (!sock) {
+      goto tail;
+  }
+
+  SYS_ARCH_PROTECT(lev);
+  switch (event->event_id) {
+    case SYSTEM_EVENT_STA_START:
+      esp_wifi_connect();
+      break;
+    case SYSTEM_EVENT_STA_GOT_IP:
+      sock->rcvevent = 1;
+      // Save ip info
+      system_event_sta_got_ip_t got_ip = event->event_info.got_ip;
+      snprintf(wificonf_ip.ip, WIFICONF_LEN, IPSTR, IP2STR(&got_ip.ip_info.ip));
+      snprintf(wificonf_ip.mask, WIFICONF_LEN, IPSTR, IP2STR(&got_ip.ip_info.netmask));
+      snprintf(wificonf_ip.gw, WIFICONF_LEN, IPSTR, IP2STR(&got_ip.ip_info.gw));
+      break;
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+      esp_wifi_connect();
+      break;
+    default:
+      break;
+  }
+
+  if (sock->select_waiting == 0) {
+    SYS_ARCH_UNPROTECT(lev);
+    goto tail;
+  }
+
+again:
+  for (scb = select_cb_list; scb != NULL; scb = scb->next) {
+    last_select_cb_ctr = select_cb_ctr;
+    if (scb->sem_signalled == 0) {
+      if (sock->rcvevent == 1) {
+        if (scb->readset && FD_ISSET(wificonf_fd, scb->readset)) {
+          scb->sem_signalled = 1;
+          sys_sem_signal(SELECT_SEM_PTR(scb->sem));
+        }
+      }
+    }
+    SYS_ARCH_UNPROTECT(lev);
+
+    SYS_ARCH_PROTECT(lev);
+    if (last_select_cb_ctr != select_cb_ctr) {
+      goto again;
+    }
+  }
+
+  SYS_ARCH_UNPROTECT(lev);
+
+tail:
+  return ESP_OK;
 }
 
 /**

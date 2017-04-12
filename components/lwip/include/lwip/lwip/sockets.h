@@ -44,6 +44,9 @@
 #include "lwip/err.h"
 #include "lwip/inet.h"
 
+#include "esp_event.h"
+#include "esp_wifi.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -536,6 +539,9 @@ int lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptse
                 struct timeval *timeout);
 int lwip_ioctl_r(int s, long cmd, void *argp);
 int lwip_fcntl_r(int s, int cmd, int val);
+
+esp_err_t wificonf_event_callback(void *ctx, system_event_t *event);
+int wificonf_getip(int wificonf_fd, char *ip, char *mask, char *gateway);
 
 #define accept(s,addr,addrlen)                    lwip_accept_r(s,addr,addrlen)
 #define bind(s,name,namelen)                      lwip_bind_r(s,name,namelen)
