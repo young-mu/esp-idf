@@ -1903,6 +1903,47 @@ tail:
   return ESP_OK;
 }
 
+esp_err_t wakeup_select(int fd)
+{
+  struct lwip_sock *sock;
+  struct lwip_select_cb *scb;
+  int last_select_cb_ctr;
+  SYS_ARCH_DECL_PROTECT(lev);
+
+  sock = get_socket(fd);
+  if (!sock) {
+      goto tail;
+  }
+
+  SYS_ARCH_PROTECT(lev);
+  if (sock->select_waiting == 0) {
+    SYS_ARCH_UNPROTECT(lev);
+    goto tail;
+  }
+
+again:
+  for (scb = select_cb_list; scb != NULL; scb = scb->next) {
+    last_select_cb_ctr = select_cb_ctr;
+    if (scb->sem_signalled == 0) {
+      if (scb->readset && FD_ISSET(fd, scb->readset)) {
+        scb->sem_signalled = 1;
+        sys_sem_signal(SELECT_SEM_PTR(scb->sem));
+      }
+    }
+    SYS_ARCH_UNPROTECT(lev);
+
+    SYS_ARCH_PROTECT(lev);
+    if (last_select_cb_ctr != select_cb_ctr) {
+      goto again;
+    }
+  }
+
+  SYS_ARCH_UNPROTECT(lev);
+
+tail:
+  return ESP_OK;
+}
+
 /**
  * Callback registered in the netconn layer for each socket-netconn.
  * Processes recvevent (data available) and wakes up tasks waiting for select.
