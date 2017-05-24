@@ -540,8 +540,8 @@ int lwip_select(int maxfdp1, fd_set *readset, fd_set *writeset, fd_set *exceptse
 int lwip_ioctl_r(int s, long cmd, void *argp);
 int lwip_fcntl_r(int s, int cmd, int val);
 
-esp_err_t wificonf_event_callback(void *ctx, system_event_t *event);
-int wificonf_getip(int wificonf_fd, char *ip, char *mask, char *gateway);
+esp_err_t wakeup_select(int fd);
+int clear_flag(int fd);
 
 #define accept(s,addr,addrlen)                    lwip_accept_r(s,addr,addrlen)
 #define bind(s,name,namelen)                      lwip_bind_r(s,name,namelen)

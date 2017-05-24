@@ -1903,6 +1903,22 @@ tail:
   return ESP_OK;
 }
 
+int clear_flag(int fd)
+{
+  struct lwip_sock *sock;
+  sock = get_socket(fd);
+  if (!sock) {
+    return -1;
+  }
+  SYS_ARCH_DECL_PROTECT(lev);
+
+  SYS_ARCH_PROTECT(lev);
+  sock->rcvevent = 0;
+  SYS_ARCH_UNPROTECT(lev);
+
+  return 0;
+}
+
 esp_err_t wakeup_select(int fd)
 {
   struct lwip_sock *sock;
@@ -1916,6 +1932,7 @@ esp_err_t wakeup_select(int fd)
   }
 
   SYS_ARCH_PROTECT(lev);
+  sock->rcvevent = 1;
   if (sock->select_waiting == 0) {
     SYS_ARCH_UNPROTECT(lev);
     goto tail;
@@ -1925,9 +1942,11 @@ again:
   for (scb = select_cb_list; scb != NULL; scb = scb->next) {
     last_select_cb_ctr = select_cb_ctr;
     if (scb->sem_signalled == 0) {
-      if (scb->readset && FD_ISSET(fd, scb->readset)) {
-        scb->sem_signalled = 1;
-        sys_sem_signal(SELECT_SEM_PTR(scb->sem));
+      if (sock->rcvevent == 1) {
+        if (scb->readset && FD_ISSET(fd, scb->readset)) {
+          scb->sem_signalled = 1;
+          sys_sem_signal(SELECT_SEM_PTR(scb->sem));
+        }
       }
     }
     SYS_ARCH_UNPROTECT(lev);
